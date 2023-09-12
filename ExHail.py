@@ -148,25 +148,7 @@ def spline_fit(x, y, z, nLons=45, debug=False):
         xLarge = np.reshape([xNow-360., xNow, xNow+360.], npts)
         zLarge = np.reshape([zNow, zNow, zNow], npts)
 
-        #xLarge, zLarge = np.zeros(npts), np.zeros(npts)
-        # OLD WAY WITH 2 GHOSTCELLS ON EACH END:
-        #xLarge[2:-2]= xNow
-        #xLarge[:2]  = xNow[-2:]-360.
-        #xLarge[-2:] = xNow[:2] +360.
-        #zLarge[2:-2]= zNow
-        #zLarge[:2]  = zNow[-2:]
-        #zLarge[-2:] = zNow[:2]
-
-        # NOT NEEDED ANYMORE:
-        # Set interpolation weights.  If zero values are mixed with
-        # non-zero values, get rid of the zero values!
-        #weights = np.zeros(zLarge.size) + 1.0
-        #if not np.all(zLarge==0):
-        #    weights[zLarge==0.0] = 0.0
-
         # Create spline function:
-        #fit = spline(xLarge, zLarge, weights, k=1, check_finite=True)
-        #fit = interp1d(xLarge, zLarge, kind='linear', assume_sorted=True)
         fit = PchipInterpolator(xLarge, zLarge)
         zFit = fit(lonNew)
 
@@ -204,7 +186,7 @@ def fix_axes(ax, rmax=3, fresh=True, dolabelx=True, title='', r_range=None):
         return
 
     if r_range is None:
-        r_range=rmax
+        r_range = rmax
 
     # Add dark boundary around outermost point:
     circ = Circle((0, 0), r_range, fill=False, ec='k', lw=1.5)
@@ -278,7 +260,8 @@ class Satellite(PbData):
     for details on opening and generating these items.
     '''
 
-    def __init__(self, theta, phi, mhd, debug=False, npoints=401, *args, **kwargs):
+    def __init__(self, theta, phi, mhd, debug=False, npoints=401,
+                 *args, **kwargs):
         from matplotlib import tri
 
         super(Satellite, self).__init__(*args, **kwargs)
@@ -286,7 +269,7 @@ class Satellite(PbData):
         # Intialize the MHD data to work nicely with our needs here:
         # Start by creating triangulation and interpolator:
         if 'trip' not in mhd:
-            posZ = mhd['z'] > 0 # Northern hemisphere only.
+            posZ = mhd['z'] > 0  # Northern hemisphere only.
             triang = tri.Triangulation(mhd['x'][posZ], mhd['y'][posZ])
             mhd['trip'] = tri.LinearTriInterpolator(triang, mhd['flux'][posZ])
 
@@ -300,7 +283,7 @@ class Satellite(PbData):
 
         # Use mhd file to get flux along trajectory:
         self['flux'] = np.array(mhd['trip'](x[loc], y[loc]))
-        self['flux'][~np.isfinite(self['flux'])]=0.0
+        self['flux'][~np.isfinite(self['flux'])] = 0.0
 
     def add_flux_line(self, target=None, loc=111, cmap='RdBu_r', contour=None,
                       zlim=[-1E12, 1E12], add_cbar=False):
@@ -391,10 +374,10 @@ class Constellation(PbData):
             fprint('nsats = {}'.format(self.nsat))
 
         # Create the fake satellite trajectories:
-        self['sats']=[]
+        self['sats'] = []
         for t, p in zip(theta, phi):
             if debug:
-                fprint('Adding satellite at {}, {}'.format(t,p))
+                fprint('Adding satellite at {}, {}'.format(t, p))
             self['sats'].append(Satellite(t, p, self.mhd, npoints=npoints))
 
         # Calculate key values:
@@ -610,7 +593,7 @@ class Constellation(PbData):
         For each satellite in the collection, add the path of the orbit through
         the northern hemisphere to the plot target.
         '''
-        fig, ax = set_target(target, loc=loc, figsize=(6,6))
+        fig, ax = set_target(target, loc=loc, figsize=(6, 6))
 
         for s in self['sats']:
             s.add_orbit_line(target=ax, *args, **kwargs)
@@ -649,7 +632,6 @@ if __name__ == '__main__':
     for a in [0, 45, 90, 135]:
         x, y, z = circle(1, 10, a)
         ax.plot(x, y, z, label='Azimuth={}'.format(a)+r'$^{\circ}$')
-        # ax.plot(x[0:1], y[0:1], z[0:1], '*', label='_')
 
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
