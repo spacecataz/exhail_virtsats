@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 '''
 Let's investigate how well or poorly we can reproduce the outflow pattern
 given a certain number of spacecraft, an inclination angle of the node
