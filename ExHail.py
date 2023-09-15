@@ -2,6 +2,10 @@
 
 '''
 A module for creating ExHail mission planning analysis.
+
+Notes:
+
+- Currently, this only operates for the northern hemisphere.
 '''
 
 import numpy as np
@@ -101,73 +105,98 @@ def remap_shell(mhd, alt):
     mhd['r'] = sqrt(mhd['x']**2+mhd['y']**2+mhd['z']**2)
 
 
-def spline_fit(x, y, z, nLons=45, debug=False):
+def pchip_fit(x, y, z, flux, nLons=45, dLat=90/51, debug=False):
     from scipy.interpolate import PchipInterpolator
     '''
-    Divide the hemisphere into kwarg *nLons* FIX DESCRIPTION
-    then use a periodic spline fit to interpolate the value *z* from
-    its original positions at *x*, *y*.
+    Divide the hemisphere into equal latitude bins. For each bin, find all
+    points that fall within the latitude range [latnow:latnow+dLat].
+    Then use a periodic PCHIP fit to interpolate the values *flux* from
+    its original positions at *x*, *y*. A new longitude range is created
+    using equally-spaced `nLons` points.
 
-    Returns the new x and y values along with the interpolated z value.
+    Arg `z` is the z-coordinate in SM coordinates corresponding to `x` and `y`.
+    It is used to calculate latitude/colatitude.
+
+    Returns the new SM x and y values along with the interpolated flux values.
     '''
 
     # Output values:
     xOut, yOut, zOut = np.array([]), np.array([]), np.array([])
 
     # Polar coordinates:
-    lat, lon = np.sqrt(x**2+y**2), 180./np.pi * np.arctan2(y, x)
+    rad = np.sqrt(x**2 + y**2 + z**2)
+    if rad.std() > 0.0001:
+        raise ValueError('Varying Altitude detected.' +
+                         'use constant altitude only.')
+    rad = rad.mean()
+    xylat, lon = np.sqrt(x**2+y**2), 180./np.pi * np.arctan2(y, x)
+    colat = 180./np.pi * np.arctan2(xylat, z)
+
+    if debug:
+        fig, ax = plt.subplots(1, 1)
+        ax.plot(xylat, colat, '.')
+        ax.set_xlabel('XYLat')
+        ax.set_ylabel('Colatitude')
+        ax.set_title('Checking Coord Conversion')
 
     lonNew = np.linspace(-180, 180, nLons)
     lonRad = lonNew*np.pi/180.
 
     # Latitude bins:
-    dLat = 0.02
-    latbins = np.arange(lat.min(), lat.max(), dLat)
+    latbins = np.arange(colat.min(), colat.max(), dLat)
 
     if debug:
-        print('Lat min and max = {}, {}'.format(lat.min(), lat.max()))
+        print('Lat min and max = {}, {}'.format(colat.min(), colat.max()))
 
-    for l in latbins:
+    for latnow in latbins:
         # Find points in current lat bin:
-        loc = (lat >= l) & (lat < l+dLat)
+        loc = (colat >= latnow) & (colat < latnow+dLat)
         xNow = lon[loc]
-        zNow = z[loc]
+        fluxNow = flux[loc]
 
-        if zNow.size == 0:
+        if fluxNow.size == 0:
             continue  # Require some points.
 
         # Ghost cells to enforce continuity:
-        npts = zNow.size*3
+        npts = fluxNow.size*3
 
         # Sort for victory:
         order = np.argsort(xNow)
         xNow = xNow[order]
-        zNow = zNow[order]
+        fluxNow = fluxNow[order]
 
         # Triplicate data to enforce periodicity.
         xLarge = np.reshape([xNow-360., xNow, xNow+360.], npts)
-        zLarge = np.reshape([zNow, zNow, zNow], npts)
+        zLarge = np.reshape([fluxNow, fluxNow, fluxNow], npts)
 
         # Create spline function:
         fit = PchipInterpolator(xLarge, zLarge)
-        zFit = fit(lonNew)
+        zFit = fit(lonNew)  # This is the interpolated flux!
 
         # Debug: show spline fitting.
         if debug and not np.all(zLarge == 0.0):
             fig = plt.figure()
             ax = fig.add_subplot(111)
-            ax.plot(xLarge, zLarge, 'r.', label='raw data points')
-            ax.plot(lonNew, fit(lonNew), 'b-', label='spline fit')
-            ax.set_title('lat bin={:.3f} obs. range=[{:.3E},{:.3E}]'.format(
-                l, zLarge.min(), zLarge.max()))
+            ax.plot(xLarge, zLarge, 'r.', label='Raw Data Points')
+            ax.plot(lonNew, fit(lonNew), 'b-', label='PCHIP fit')
+            ax.set_xlabel(r'SM Longitude ($^{\circ}$ from local noon)')
+            ax.set_ylabel(r'Outflow Flux ($m^{-2}s^{-1}$)')
+            ax.set_title('PCHIP Fitting: ' +
+                         f'Colat=[{latnow:.3E}, {latnow + dLat:.3E}]')
+            # ax.set_title('lat bin={:.3f} obs. range=[{:.3E},{:.3E}]'.format(
+            #     latnow, zLarge.min(), zLarge.max()))
+            fig.tight_layout()
 
-        xOut = np.append(xOut, (l+.5*dLat)*np.cos(lonRad))
-        yOut = np.append(yOut, (l+.5*dLat)*np.sin(lonRad))
+        # Convert radius, colat back into SM X/Y:
+        xynow = rad * np.sin(np.pi/180 * (latnow + .5*dLat))
+        xOut = np.append(xOut, xynow*np.cos(lonRad))
+        yOut = np.append(yOut, xynow*np.sin(lonRad))
         zOut = np.append(zOut, zFit)
-
+        if debug:
+            raise Exception
     # If things go spectacularly bad, just crash.
     if xOut.size == 0:
-        raise ValueError('SplineFit produced zero real points')
+        raise ValueError('PCHIP produced zero real points')
 
     return xOut, yOut, zOut
 
@@ -322,7 +351,7 @@ class Satellite(PbData):
 
         # Tidy up axes if brand new plot.
         if not issubclass(type(target), plt.Axes):
-            fix_axes(ax, rmax=self.r)
+            fix_axes(ax, rmax=self.rad)
 
         return fig, ax, lc
 
@@ -423,24 +452,27 @@ class Constellation(PbData):
 
     def calc_allflux(self):
         '''
-        Using spline fits over many latitudes, create 2D flux.
+        Using PCHIP fits over many latitudes, create 2D flux.
         '''
 
         xAll, yAll, zAll = np.array([]), np.array([]), np.array([])
+        fAll = np.array([])  # All fluxes.
         for s in self['sats']:
             xAll = np.append(xAll, s['x'])
             yAll = np.append(yAll, s['y'])
-            zAll = np.append(zAll, s['flux'])
+            zAll = np.append(zAll, s['z'])
+            fAll = np.append(fAll, s['flux'])
 
         self.xAll = xAll
         self.yAll = yAll
         self.zAll = zAll
+        self.fAll = fAll
 
         self['x'], self['y'], self['flux'] = \
-            spline_fit(xAll, yAll, zAll, debug=self.debug)
+            pchip_fit(xAll, yAll, zAll, fAll, debug=self.debug)
 
         # Save number of lats and lons:
-        self.attrs['nlon'] = 45  # same as value from spline_fit, default=45
+        self.attrs['nlon'] = 45  # same as value from pchip_fit, default=45
         self.attrs['nlat'] = self['flux'].size / self.attrs['nlon']
 
     def calc_fluence(self):
@@ -623,9 +655,12 @@ class Constellation(PbData):
 
 if __name__ == '__main__':
     '''
-    Run some tests.
+    Run some demonstrations.
     '''
 
+    import gmoutflow as gmo
+
+    # Demonstration 1: Circular satellite orbits.
     fig = plt.figure()
     ax = fig.add_subplot(projection='3d')
 
@@ -638,4 +673,32 @@ if __name__ == '__main__':
     ax.set_zlabel('Z')
 
     ax.legend()
+
+    # Demonstration 2: Example of a flux reconstruction
+    # Open an MHD shell file (legacy format):
+    mhd = gmo.read_shell('sample_data/shell_r300_southward.dat')
+    remap_shell(mhd, 1400)
+
+    # Fly a satellite constellation through it:
+    nsats = 5
+    azim_all = [x for x in np.linspace(-45, 45, nsats)]
+    sats = Constellation(azim_all, nsats*[10], mhd)
+
+    # Create figure:
+    fig = plt.figure(figsize=[9, 4])
+
+    # Add flux plot, show where sats are flying:
+    fig, a1, cont = gmo.add_flux_plot(mhd, target=fig, loc=131,
+                                      add_cbar=False, colat_max=45)
+    sats.add_orbit_lines(target=a1)
+    # Show flux extractions:
+    f, a2 = sats.add_flux_lines(target=fig, loc=132, colat_max=45)
+    # Show reconstruction:
+    f, a3, cont = sats.add_flux_obs(target=fig, loc=133, colat_max=45)
+
+    # Clean up and label:
+    a2.set_title('Virtual Obs.')
+    a3.set_title('Reconstruction')
+    fig.tight_layout()
+
     plt.show()
